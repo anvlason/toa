@@ -47,8 +47,8 @@ def gdal_write_rgb(oname,r,g,b,sds,nodata=0,OutDataType=gdal.GDT_UInt16):
     ods= None
 #-----------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------
-def calc_toa(data,sun_az,mult,add):
-    out = (np.copy(data)*mult+add)/np.cos(sun_az)
+def calc_toa(data,sun_zen,mult,add):
+    out = (np.copy(data)*mult+add)/np.cos(sun_zen)
     out[data==0]=0
     return out
 
@@ -208,11 +208,11 @@ if __name__ == '__main__':
 #    outname_cl = outdir+"/"+basename+"_CLD.TIF"
 #    outname_sn = outdir+"/"+basename+"_SNW.TIF"
     outname_ma = outdir+"/"+basename+"_MSK.TIF"
-    sun_az = get_sun(wrkdir+"/"+basename+"_MTL.txt")
-    if(sun_az is None):
-        logging.info("ERROR!!! Can't read sun azimuth")
+    sun_zen = get_sun(wrkdir+"/"+basename+"_MTL.txt")
+    if(sun_zen is None):
+        logging.info("ERROR!!! Can't read sun zenith")
         exit(2)
-    logging.info("Sun Azimuth angle = %f"%(np.degrees(sun_az)))
+    logging.info("Sun Zenith angle = %f"%(np.degrees(sun_az)))
     mult = 2.0000E-05
     add = -0.100000
     scale = 10000

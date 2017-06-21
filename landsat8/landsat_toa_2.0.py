@@ -90,7 +90,7 @@ def get_sun_mat(fn,out):
         except:
             print "shit happend"
             return None
-        sun_mat = np.cos(np.radians(90.0-ds.GetRasterBand(2).ReadAsArray().astype(np.float32)*0.01))
+        sun_mat = np.cos(np.radians(ds.GetRasterBand(2).ReadAsArray().astype(np.float32)*0.01))
         map(os.remove,glob.glob(out+"/*solar*"))
         return sun_mat
     return None
