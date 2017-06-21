@@ -234,9 +234,10 @@ if __name__ == '__main__':
 #    if(check_missed(wrkdir+"/",basename,basename+"_MTL.txt")!=0 or check_missed(wrkdir+"/",basename,basename+"_BQA.TIF")#!=0):
 #        exit(1)
 #    logging.info("Downloading MTL and BQA Done")
-    outname_cl = outdir+"/"+basename+"_CLD.TIF"
-    outname_sn = outdir+"/"+basename+"_SNW.TIF"
-    outname_sw = outdir+"/"+basename+"_SDW.TIF"
+#    outname_cl = outdir+"/"+basename+"_CLD.TIF"
+#    outname_sn = outdir+"/"+basename+"_SNW.TIF"
+#    outname_sw = outdir+"/"+basename+"_SDW.TIF"
+    outname_ma = outdir+"/"+basename+"_MSK.TIF"
     sun_zen = get_sun_mat(wrkdir+"/"+basename+"_ANG.txt",outdir)
     if(sun_zen is None):
         print "Single Sun Zenith mode"
@@ -248,6 +249,56 @@ if __name__ == '__main__':
     mult = 2.0000E-05
     add = -0.100000
     scale = 10000
+#try to read BQA file
+    try:
+        logging.info("Start reading BQA: %s"%(wrkdir+"/"+basename+"_BQA.TIF"))
+        dsbqa = gdal.Open(wrkdir+"/"+basename+"_BQA.TIF",gdal.GA_ReadOnly)
+        bqa = dsbqa.ReadAsArray()
+        logging.info("Finish reading BQA: %s"%(basename+"_BQA.TIF"))
+    except:
+        logging.info("ERROR!!! Can't read BQA file %s"%(basename+"_BQA.TIF"))
+        exit(3)
+#create nodata mask from BQA
+    ndmask = bqa==0
+    mask = np.zeros(bqa.shape,dtype=int)
+    logging.info("Start extraction CLOUD mask")
+    cloud = np.logical_or(bqa==6816,np.logical_or(bqa==6820,np.logical_or(bqa==6824,np.logical_or(bqa==6828,np.logical_or(bqa==6896,np.logical_or(bqa==2752,np.logical_or(bqa==2800,np.logical_or(bqa==2804,np.logical_or(bqa==2808,bqa==2812)))))))))
+    mask_g = remove_small_obj(cloud,min_area)
+    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
+    mask[mask_f==1] = 10
+#    try:
+#        gdal_write(outname_cl,mask_f,dsbqa,0,gdal.GDT_Byte,options)
+#    except:
+#        logging.info("ERROR!!! Can't write output file %s"%(outname_cl))
+    del cloud, mask_g, mask_f
+    logging.info("Finish extraction CLOUD mask")
+    logging.info("Start extraction SNOW mask")
+    snow = np.logical_or(bqa==3744,np.logical_or(bqa==3748,np.logical_or(bqa==3752,bqa==3756)))
+    mask_g = remove_small_obj(snow,min_area)
+    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
+    mask[mask_f==1] = 20
+ #   try:
+ #       gdal_write(outname_sn,mask_f,dsbqa,0,gdal.GDT_Byte,options)
+ #   except:
+ #       logging.info("ERROR!!! Can't write output file %s"%(outname_sn))
+    del snow, mask_g, mask_f
+    logging.info("Finish extraction SNOW mask")
+
+    logging.info("Start extraction SHADOW mask")
+    shadow = np.logical_or(bqa==7072,bqa==2976)
+    mask_g = remove_small_obj(shadow,min_area)
+    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
+    mask[mask_f==1] = 30
+    del shadow, mask_g, mask_f
+    logging.info("Finish extraction SHADOW mask")    
+    try:
+        gdal_write(outname_ma,mask,dsbqa,0,gdal.GDT_Byte,options)
+    except:
+        logging.info("ERROR!!! Can't write output file %s"%(outname_ma))
+
+    del bqa, dsbqa, mask
+    
+
     for tif in glob.glob(wrkdir+"/*.TIF"):
 #        if((tif[-7:] == "BQA.TIF") or (tif[-7:] == "B10.TIF") or (tif[-7:] == "B11.TIF")): continue
         if((tif[-7:] == "BQA.TIF")): continue        
@@ -260,10 +311,12 @@ if __name__ == '__main__':
         if((tif[-7:] == "B10.TIF") or (tif[-7:] == "B11.TIF")):
             band = int(tif[-6:-4])
             data = calc_kelvin(ds.ReadAsArray().astype(np.float),wrkdir+"/"+basename+"_MTL.txt",band)
+            data[ndmask]=0
             oname = outdir+"/"+re.sub(".TIF", "_TPK.TIF",os.path.basename(tif),re.IGNORECASE)
             scale = 10
         else:
             data = calc_toa(ds.ReadAsArray().astype(np.float),sun_zen,mult,add)
+            data[ndmask]=0
             oname = outdir+"/"+re.sub(".TIF", "_TOA.TIF",os.path.basename(tif),re.IGNORECASE)
             scale = 10000
         try:
@@ -273,48 +326,7 @@ if __name__ == '__main__':
             continue
         logging.info("Finish processing band: %s"%(tif))
         del data, ds
-    try:
-        logging.info("Start reading BQA: %s"%(wrkdir+"/"+basename+"_BQA.TIF"))
-        dsbqa = gdal.Open(wrkdir+"/"+basename+"_BQA.TIF",gdal.GA_ReadOnly)
-        bqa = dsbqa.ReadAsArray()
-        logging.info("Finish reading BQA: %s"%(basename+"_BQA.TIF"))
-    except:
-        logging.info("ERROR!!! Can't read BQA file %s"%(basename+"_BQA.TIF"))
-        exit(3)
-    
-    logging.info("Start extraction CLOUD mask")
-    cloud = np.logical_or(bqa==6816,np.logical_or(bqa==6820,np.logical_or(bqa==6824,np.logical_or(bqa==6828,np.logical_or(bqa==6896,np.logical_or(bqa==2752,np.logical_or(bqa==2800,np.logical_or(bqa==2804,np.logical_or(bqa==2808,bqa==2812)))))))))
-    mask_g = remove_small_obj(cloud,min_area)
-    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
-    try:
-        gdal_write(outname_cl,mask_f,dsbqa,0,gdal.GDT_Byte,options)
-    except:
-        logging.info("ERROR!!! Can't write output file %s"%(outname_cl))
-    del cloud, mask_g, mask_f
-    logging.info("Finish extraction CLOUD mask")
-    logging.info("Start extraction SNOW mask")
-    snow = np.logical_or(bqa==3744,np.logical_or(bqa==3748,np.logical_or(bqa==3752,bqa==3756)))
-    mask_g = remove_small_obj(snow,min_area)
-    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
-    try:
-        gdal_write(outname_sn,mask_f,dsbqa,0,gdal.GDT_Byte,options)
-    except:
-        logging.info("ERROR!!! Can't write output file %s"%(outname_sn))
-    del snow, mask_g, mask_f
-    logging.info("Finish extraction SNOW mask")
 
-    logging.info("Start extraction SHADOW mask")
-    shadow = np.logical_or(bqa==7072,bqa==2976)
-    mask_g = remove_small_obj(shadow,min_area)
-    mask_f = ndimage.morphology.binary_fill_holes(mask_g)
-    try:
-        gdal_write(outname_sw,mask_f,dsbqa,0,gdal.GDT_Byte,options)
-    except:
-        logging.info("ERROR!!! Can't write output file %s"%(outname_sw))
-    del shadow, mask_g, mask_f
-    logging.info("Finish extraction SHADOW mask")
-    
-    del bqa, dsbqa
 
     gc.collect()
     logging.info("Start copying MTL and BQA")

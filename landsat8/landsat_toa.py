@@ -51,6 +51,19 @@ def calc_toa(data,sun_az,mult,add):
     out = (np.copy(data)*mult+add)/np.cos(sun_az)
     out[data==0]=0
     return out
+
+#-----------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------
+def calc_kelvin(data,mtl,band):
+    gain,bias,k1,k2 = get_thermal_gain(mtl,band)
+    print gain,bias,k1,k2
+#    K2 / ln (K1/Ll +1)
+    out = np.copy(data)
+    out[data==0]=0.000001
+    out = k2/np.log(k1/(out*gain+bias)+1)
+    out[data==0]=0
+    return out
+    
 #-----------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------
 def get_sun(mtl):
@@ -72,6 +85,30 @@ def get_cloud_prc(mtl):
             value = float(re.search("([0-9.-]+)",line.split()[2]).group(0))
     searchfile.close()
     return value
+
+#-----------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------
+def get_thermal_gain(mtl,band):
+    searchfile = open(mtl, "r")
+    gain = 1.0
+    bias = 0.0
+    k1 = 1.0
+    k2 = 1.0
+    nums2 = re.compile(r"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+    for line in searchfile:
+        if "RADIANCE_MULT_BAND_%d"%band in line:
+            gain = float(nums2.search(line.split()[2]).group(0))
+        if "RADIANCE_ADD_BAND_%d"%band in line:
+            bias = float(nums2.search(line.split()[2]).group(0))
+        if "K1_CONSTANT_BAND_%d"%band in line:
+            k1 = float(nums2.search(line.split()[2]).group(0))
+        if "K2_CONSTANT_BAND_%d"%band in line:
+            k2 = float(nums2.search(line.split()[2]).group(0))
+
+    searchfile.close()
+    return gain,bias,k1,k2
+
+    
 #-----------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------
 def gdal_write(oname,data,sds,nodata=-9999,OutDataType=gdal.GDT_Float32,options=None):    
@@ -168,8 +205,9 @@ if __name__ == '__main__':
     if(check_missed(wrkdir+"/",basename,basename+"_MTL.txt")!=0 or check_missed(wrkdir+"/",basename,basename+"_BQA.TIF")!=0):
         exit(1)
     logging.info("Downloading MTL and BQA Done")
-    outname_cl = outdir+"/"+basename+"_CLD.TIF"
-    outname_sn = outdir+"/"+basename+"_SNW.TIF"
+#    outname_cl = outdir+"/"+basename+"_CLD.TIF"
+#    outname_sn = outdir+"/"+basename+"_SNW.TIF"
+    outname_ma = outdir+"/"+basename+"_MSK.TIF"
     sun_az = get_sun(wrkdir+"/"+basename+"_MTL.txt")
     if(sun_az is None):
         logging.info("ERROR!!! Can't read sun azimuth")
@@ -178,23 +216,7 @@ if __name__ == '__main__':
     mult = 2.0000E-05
     add = -0.100000
     scale = 10000
-    for tif in glob.glob(wrkdir+"/*.TIF"):
-        if((tif[-7:] == "BQA.TIF") or (tif[-7:] == "B10.TIF") or (tif[-7:] == "B11.TIF")): continue
-        try:
-            logging.info("Start processing band: %s"%(tif))
-            ds = gdal.Open(tif,gdal.GA_ReadOnly)
-        except:
-            logging.info("ERROR!!! bad tif: %s"%(tif))
-            continue
-        data = calc_toa(ds.ReadAsArray().astype(np.float),sun_az,mult,add)
-        oname = outdir+"/"+re.sub(".TIF", "_TOA.TIF",os.path.basename(tif),re.IGNORECASE)
-        try:
-            gdal_write(oname,data*scale,ds,0,gdal.GDT_UInt16,options)
-        except:
-            logging.info("ERROR!!! Can't write output file %s"%(oname))
-            continue
-        logging.info("Finish processing band: %s"%(tif))
-        del data, ds
+#try to read BQA file
     try:
         logging.info("Start reading BQA: %s"%(wrkdir+"/"+basename+"_BQA.TIF"))
         dsbqa = gdal.Open(wrkdir+"/"+basename+"_BQA.TIF",gdal.GA_ReadOnly)
@@ -203,28 +225,65 @@ if __name__ == '__main__':
     except:
         logging.info("ERROR!!! Can't read BQA file %s"%(basename+"_BQA.TIF"))
         exit(3)
-    
+#create nodata mask from BQA
+    ndmask = bqa==0
+    mask = np.zeros(bqa.shape,dtype=int)
+
     logging.info("Start extraction CLOUD mask")
     cloud = np.logical_or(bqa==61440,np.logical_or(bqa==57344,np.logical_or(bqa==53248,bqa==28672)))
     mask_g = remove_small_obj(cloud,min_area)
     mask_f = ndimage.morphology.binary_fill_holes(mask_g)
-    try:
-        gdal_write(outname_cl,mask_f,dsbqa,0,gdal.GDT_Byte,options)
-    except:
-        logging.info("ERROR!!! Can't write output file %s"%(outname_cl))
+    mask[mask_f==1] = 10    
+#    try:
+#        gdal_write(outname_cl,mask_f,dsbqa,0,gdal.GDT_Byte,options)
+#    except:
+#        logging.info("ERROR!!! Can't write output file %s"%(outname_cl))
     del cloud, mask_g, mask_f
     logging.info("Finish extraction CLOUD mask")
     logging.info("Start extraction SNOW mask")
     snow = np.logical_or(bqa==23552,np.logical_or(bqa==28590,np.logical_or(bqa==31744,np.logical_or(bqa==39936,bqa==56320))))
     mask_g = remove_small_obj(snow,min_area)
     mask_f = ndimage.morphology.binary_fill_holes(mask_g)
-    try:
-        gdal_write(outname_sn,mask_f,dsbqa,0,gdal.GDT_Byte,options)
-    except:
-        logging.info("ERROR!!! Can't write output file %s"%(outname_sn))
     del snow, mask_g, mask_f
-    del bqa, dsbqa
+#    try:
+#        gdal_write(outname_sn,mask_f,dsbqa,0,gdal.GDT_Byte,options)
+#    except:
+#        logging.info("ERROR!!! Can't write output file %s"%(outname_sn))
+    try:
+        gdal_write(outname_ma,mask,dsbqa,0,gdal.GDT_Byte,options)
+    except:
+        logging.info("ERROR!!! Can't write output file %s"%(outname_ma))
+
+    del bqa, dsbqa, mask
     logging.info("Finish extraction SNOW mask")
+
+    for tif in glob.glob(wrkdir+"/*.TIF"):
+        if((tif[-7:] == "BQA.TIF")): continue        
+        try:
+            logging.info("Start processing band: %s"%(tif))
+            ds = gdal.Open(tif,gdal.GA_ReadOnly)
+        except:
+            logging.info("ERROR!!! bad tif: %s"%(tif))
+            continue
+        if((tif[-7:] == "B10.TIF") or (tif[-7:] == "B11.TIF")):
+            band = int(tif[-6:-4])
+            data = calc_kelvin(ds.ReadAsArray().astype(np.float),wrkdir+"/"+basename+"_MTL.txt",band)
+            data[ndmask]=0
+            oname = outdir+"/"+re.sub(".TIF", "_TPK.TIF",os.path.basename(tif),re.IGNORECASE)
+            scale = 10
+        else:
+            data = calc_toa(ds.ReadAsArray().astype(np.float),sun_zen,mult,add)
+            data[ndmask]=0
+            oname = outdir+"/"+re.sub(".TIF", "_TOA.TIF",os.path.basename(tif),re.IGNORECASE)
+            scale = 10000
+        try:
+            gdal_write(oname,data*scale,ds,0,gdal.GDT_UInt16,options)
+        except:
+            logging.info("ERROR!!! Can't write output file %s"%(oname))
+            continue
+        logging.info("Finish processing band: %s"%(tif))
+        del data, ds
+    
     gc.collect()
     logging.info("Start copying MTL and BQA")
     shutil.copy(wrkdir+"/"+basename+"_MTL.txt",outdir)
